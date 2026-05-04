@@ -89,7 +89,7 @@ public unsafe class TargetLine {
     {
         if (FocusTarget)
         {
-            if (Self != Service.ClientState.LocalPlayer)
+            if (Self != Service.ObjectTable.LocalPlayer)
             {
                 return 0xE0000000;
             }
@@ -97,7 +97,7 @@ public unsafe class TargetLine {
             var target = TargetSystem.Instance();
             if (target != null)
             {
-                if (target->FocusTarget != null && target->FocusTarget->EntityId != Service.ClientState.LocalPlayer.EntityId)
+                if (target->FocusTarget != null && target->FocusTarget->EntityId != Service.ObjectTable.LocalPlayer.EntityId)
                 {
                     return target->FocusTarget->EntityId;
                 }
@@ -120,7 +120,7 @@ public unsafe class TargetLine {
     {
         if (FocusTarget)
         {
-            if (Self != Service.ClientState.LocalPlayer)
+            if (Self != Service.ObjectTable.LocalPlayer)
             {
                 return null;
             }
@@ -128,7 +128,7 @@ public unsafe class TargetLine {
             var target = TargetSystem.Instance();
             if (target != null)
             {
-                if (target->FocusTarget != null && target->FocusTarget->EntityId != Service.ClientState.LocalPlayer.EntityId)
+                if (target->FocusTarget != null && target->FocusTarget->EntityId != Service.ObjectTable.LocalPlayer.EntityId)
                 {
                     return Service.ObjectTable.SearchById(target->FocusTarget->GetGameObjectId());
                 }
@@ -175,7 +175,7 @@ public unsafe class TargetLine {
 
             if (Sleeping)
             {
-                if ((FocusTarget && Service.ClientState.LocalPlayer?.IsDead != true) || !FocusTarget)
+                if ((FocusTarget && Service.ObjectTable.LocalPlayer?.IsDead != true) || !FocusTarget)
                 {
                     State = LineState.NewTarget;
                 }
@@ -250,13 +250,13 @@ public unsafe class TargetLine {
 
     public unsafe Vector3 GetSourcePosition(out bool fpp)
     {
-        return CalculatePosition(Self.Position, Self.GetHeadHeight(), Self.EntityId == Service.ClientState.LocalPlayer.EntityId, out fpp);
+        return CalculatePosition(Self.Position, Self.GetHeadHeight(), Self.EntityId == Service.ObjectTable.LocalPlayer.EntityId, out fpp);
     }
 
     public unsafe Vector3 GetTargetPosition(out bool fpp)
     {
         var target = GetTargetObject();
-        return CalculatePosition(target.Position, target.GetHeadHeight(), target.EntityId == Service.ClientState.LocalPlayer.EntityId, out fpp);
+        return CalculatePosition(target.Position, target.GetHeadHeight(), target.EntityId == Service.ObjectTable.LocalPlayer.EntityId, out fpp);
     }
 
 
@@ -690,7 +690,7 @@ public unsafe class TargetLine {
 
         if (State != LineState.Dying2)
         {
-            if (FocusTarget && Service.ClientState.LocalPlayer?.IsDead == true)
+            if (FocusTarget && Service.ObjectTable.LocalPlayer?.IsDead == true)
             {
                 HadTarget = HasTarget;
                 return;
@@ -1037,7 +1037,7 @@ public unsafe class TargetLine {
             return;
         }
 
-        if (((csObj->RenderFlags & 0x800) != 0 || Self.IsDead) && State != LineState.Dying2)
+        if ((((int)csObj->RenderFlags & 0x800) != 0 || Self.IsDead) && State != LineState.Dying2)
         {
             State = LineState.Dying2;
             StateTime = 0;
@@ -1133,7 +1133,7 @@ public unsafe class TargetLine {
         if (Globals.HandlePvPTime > 150 && Self.GetIsPlayerCharacter())
         {
             var player = (Character*)Self.Address;
-            if (player->GameObject.EntityId == Service.ClientState.LocalPlayer?.EntityId)
+            if (player->GameObject.EntityId == Service.ObjectTable.LocalPlayer?.EntityId)
             {
                 return;
             }
@@ -1148,9 +1148,9 @@ public unsafe class TargetLine {
             else if (player->GameObject.ObjectKind == FFXIVClientStructs.FFXIV.Client.Game.Object.ObjectKind.Pc)
             {
                 // probably a baddie, target the player character
-                if (Service.ClientState.LocalPlayer != null)
+                if (Service.ObjectTable.LocalPlayer != null)
                 {
-                    player->TargetId = Service.ClientState.LocalPlayer.EntityId;
+                    player->TargetId = Service.ObjectTable.LocalPlayer.EntityId;
                 }
             }
         }

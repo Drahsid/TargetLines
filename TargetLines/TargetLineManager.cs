@@ -96,7 +96,7 @@ public static class TargetLineManager
         int renderedLineCount = 0;
         int processedLineCount = 0;
 
-        if (Service.ClientState.LocalPlayer == null || TargetLineArray == null) {
+        if (Service.ObjectTable.LocalPlayer == null || TargetLineArray == null) {
             return;
         }
 
@@ -112,11 +112,11 @@ public static class TargetLineManager
         var target = TargetSystem.Instance();
         if (target != null)
         {
-            if (FocusTargetLine.Sleeping && !Service.ClientState.LocalPlayer.IsDead)
+            if (FocusTargetLine.Sleeping && !Service.ObjectTable.LocalPlayer.IsDead)
             {
-                if (target->FocusTarget != null && target->FocusTarget->EntityId != Service.ClientState.LocalPlayer.EntityId)
+                if (target->FocusTarget != null && target->FocusTarget->EntityId != Service.ObjectTable.LocalPlayer.EntityId)
                 {
-                    InitializeLine(FocusTargetLine, Service.ClientState.LocalPlayer);
+                    InitializeLine(FocusTargetLine, Service.ObjectTable.LocalPlayer);
                 }
             }
 
@@ -227,7 +227,7 @@ public static class TargetLineManager
     }
 
     private static void DrawOverlay_DX() {
-        if (Service.ClientState.LocalPlayer == null || Service.ClientState.IsPvP || !ShaderSingleton.Initialized) {
+        if (Service.ObjectTable.LocalPlayer == null || Service.ClientState.IsPvP || !ShaderSingleton.Initialized) {
             return;
         }
 
@@ -244,10 +244,10 @@ public static class TargetLineManager
         }
 
         if (Globals.Config.saved.DebugDXLines && TestLine != null) {
-            TestLine.Source = Service.ClientState.LocalPlayer.GetHeadPosition();
+            TestLine.Source = Service.ObjectTable.LocalPlayer.GetHeadPosition();
 
-            if (Service.ClientState.LocalPlayer.TargetObject != null) {
-                TestLine.Destination = Service.ClientState.LocalPlayer.TargetObject.GetHeadPosition();
+            if (Service.ObjectTable.LocalPlayer.TargetObject != null) {
+                TestLine.Destination = Service.ObjectTable.LocalPlayer.TargetObject.GetHeadPosition();
             }
             else {
                 TestLine.Destination = new Vector3(1.0f, 0.1f, 5.0f);

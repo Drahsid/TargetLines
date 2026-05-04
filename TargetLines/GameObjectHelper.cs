@@ -53,7 +53,7 @@ public static class GameObjectExtensions {
     }
 
     public static bool GetIsPlayerCharacter(this IGameObject obj) {
-        return obj.ObjectKind == ObjectKind.Player;
+        return obj.ObjectKind == ObjectKind.Pc;
     }
 
     public static bool GetIsBattleNPC(this IGameObject obj) {
@@ -77,8 +77,8 @@ public static class GameObjectExtensions {
         TargetSettings settings = new TargetSettings();
         settings.Flags = TargetFlags.Any;
 
-        if (Service.ClientState.LocalPlayer != null) {
-            if (obj.EntityId == Service.ClientState.LocalPlayer.EntityId) {
+        if (Service.ObjectTable.LocalPlayer != null) {
+            if (obj.EntityId == Service.ObjectTable.LocalPlayer.EntityId) {
                 settings.Flags |= TargetFlags.Self;
             }
         }

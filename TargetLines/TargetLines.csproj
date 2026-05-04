@@ -1,6 +1,6 @@
-﻿<Project Sdk="Dalamud.NET.Sdk/13.0.0">
+﻿<Project Sdk="Dalamud.NET.Sdk/15.0.0">
 	<PropertyGroup>
-        <TargetFramework>net9.0</TargetFramework>
+        <TargetFramework>net10.0-windows</TargetFramework>
         <LangVersion>preview</LangVersion>
         <NoWarn>1701;1702;CS0472;CA1416</NoWarn>
 		<Configurations>Debug;Release;Unlocked</Configurations>
