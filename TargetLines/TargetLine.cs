@@ -47,6 +47,8 @@ public unsafe class TargetLine {
     public TargetSettingsPair LineSettings = new TargetSettingsPair(new TargetSettings(), new TargetSettings(), new LineColor());
     public bool FocusTarget = false;
 
+    private readonly TargetSettingsPair FallbackLineSettings = new TargetSettingsPair(new TargetSettings(), new TargetSettings(), new LineColor(), int.MinValue);
+
     private Vector2 ScreenPos = new Vector2();
     private Vector2 MidScreenPos = new Vector2();
     private Vector2 TargetScreenPos = new Vector2();
@@ -909,10 +911,8 @@ public unsafe class TargetLine {
 
     private void UpdateColors_ApplyFallbackSettings()
     {
-        LastLineColor.raw = LineColor.raw;
-        LastOutlineColor.raw = OutlineColor.raw;
-
-        LineSettings.LineColor = Globals.Config.saved.LineColor;
+        FallbackLineSettings.LineColor = Globals.Config.saved.LineColor;
+        LineSettings = FallbackLineSettings;
         LineColor.raw = LineSettings.LineColor.Color.raw;
         OutlineColor.raw = LineSettings.LineColor.OutlineColor.raw;
     }
@@ -945,7 +945,7 @@ public unsafe class TargetLine {
 
         foreach (var settings in Globals.Config.LineColors)
         {
-            if (settings == null)
+            if (settings == null || settings.From == null || settings.To == null || settings.LineColor == null)
             {
                 continue;
             }
@@ -983,18 +983,23 @@ public unsafe class TargetLine {
 
         TargetSettingsPair? selectedSettings = UpdateColors_SelectBestSettings(selfSettings, targSettings);
 
-        if (selectedSettings != null && selectedSettings.LineColor.Visible)
+        if (selectedSettings != null)
         {
             UpdateColors_ApplySettings(selectedSettings);
-        }
-        else if (Globals.Config.saved.LineColor.Visible)
-        {
-            UpdateColors_ApplyFallbackSettings();
+            if (!selectedSettings.LineColor.Visible)
+            {
+                UpdateColors_SetInvisible();
+                return;
+            }
         }
         else
         {
-            UpdateColors_SetInvisible();
-            return;
+            UpdateColors_ApplyFallbackSettings();
+            if (!LineSettings.LineColor.Visible)
+            {
+                UpdateColors_SetInvisible();
+                return;
+            }
         }
 
         UpdateColors_ApplyAlphaEffects();
