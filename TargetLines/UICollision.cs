@@ -194,8 +194,17 @@ public static class UICollision {
     {
         uiRects.Clear();
 
-        RaptureAtkUnitManager* manager = AtkStage.Instance()->RaptureAtkUnitManager;
-        if (manager == null) return;
+        AtkStage* stage = AtkStage.Instance();
+        if (stage == null)
+        {
+            return;
+        }
+
+        RaptureAtkUnitManager* manager = stage->RaptureAtkUnitManager;
+        if (manager == null)
+        {
+            return;
+        }
 
         var group = GroupManager.Instance();
         bool isAlliance = group != null && group->MainGroup.IsAlliance;
@@ -262,6 +271,11 @@ public static class UICollision {
 
         foreach (var rect in drawableAreas)
         {
+            if (rect.Width <= 0.0f || rect.Height <= 0.0f)
+            {
+                continue;
+            }
+
             drawList.PushClipRect(rect.TopLeft, rect.BottomRight, true);
             drawContent();
             drawList.PopClipRect();

@@ -11,9 +11,14 @@ internal class ImGuiUtils {
         ImGuiHelpers.ForceNextWindowMainViewport();
         ImGui.SetNextWindowPos(ImGui.GetMainViewport().Pos);
         ImGui.SetNextWindowSize(ImGui.GetMainViewport().Size);
-        if (ImGui.Begin(name, flags)) {
-            began = true;
-            fn();
+        began = ImGui.Begin(name, flags);
+
+        try {
+            if (began) {
+                fn();
+            }
+        }
+        finally {
             ImGui.End();
         }
 

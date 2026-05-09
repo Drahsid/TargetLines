@@ -101,7 +101,8 @@ public class Plugin : IDalamudPlugin {
     private void OnDraw() {
         Windows.System.Draw();
 
-        if (Service.ObjectTable.LocalPlayer == null) {
+        var localPlayer = Service.ObjectTable.LocalPlayer;
+        if (localPlayer == null) {
             PlayerWasNull = true;
             return;
         }
@@ -120,7 +121,7 @@ public class Plugin : IDalamudPlugin {
         }
 
         if (!Globals.Config.saved.OnlyUnsheathed
-            || (Service.ObjectTable.LocalPlayer.StatusFlags & Dalamud.Game.ClientState.Objects.Enums.StatusFlags.WeaponOut) != 0) {
+            || (localPlayer.StatusFlags & Dalamud.Game.ClientState.Objects.Enums.StatusFlags.WeaponOut) != 0) {
             if ((Globals.Config.saved.OnlyInCombat == InCombatOption.None
                 || (Globals.Config.saved.OnlyInCombat == InCombatOption.InCombat && combat_flag))
                 || (Globals.Config.saved.OnlyInCombat == InCombatOption.NotInCombat && !combat_flag)) {

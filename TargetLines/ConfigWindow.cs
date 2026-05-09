@@ -205,6 +205,10 @@ internal class ConfigWindow : WindowWrapper {
 
         for (int qndex = 0; qndex < Globals.Config.LineColors.Count; qndex++) {
             var settings = Globals.Config.LineColors[qndex];
+            if (settings == null || settings.From == null || settings.To == null || settings.LineColor == null) {
+                continue;
+            }
+
             var guid = settings.UniqueId.ToString();
             int flag_count = Enum.GetValues(typeof(TargetFlags)).Length;
             List<string> from = new List<string>();
@@ -336,7 +340,19 @@ internal class ConfigWindow : WindowWrapper {
 
         ImGui.SameLine();
         if (ImGui.Button("Paste Preset")) {
-            Globals.Config.LineColors = JsonConvert.DeserializeObject<List<TargetSettingsPair>>(ImGui.GetClipboardText());
+            try {
+                var pastedLineColors = JsonConvert.DeserializeObject<List<TargetSettingsPair>>(ImGui.GetClipboardText());
+                if (pastedLineColors != null) {
+                    Globals.Config.LineColors = pastedLineColors;
+                }
+                else {
+                    Service.ChatGui.Print("Clipboard did not contain a preset.");
+                }
+            }
+            catch (Exception ex) {
+                Service.Logger.Warning($"Could not paste Target Lines preset: {ex.Message}");
+                Service.ChatGui.Print("Failed to parse clipboard preset.");
+            }
         }
         if (ImGui.IsItemHovered()) {
             ImGui.SetTooltip("Paste rules from the clipboard. This overwrites your existing rules!");

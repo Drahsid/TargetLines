@@ -1,4 +1,5 @@
 ﻿using System.Numerics;
+using System;
 using System.Runtime.CompilerServices;
 
 namespace TargetLines;
@@ -6,6 +7,45 @@ namespace TargetLines;
 public static class MathUtils {
     public static readonly float RAD2DEG = 57.29577951308232f;
     public static readonly float DEG2RAD = 0.017453292519943f;
+    private const float NormalizeEpsilonSquared = 0.000000000001f;
+
+    public static float Clamp01(float value) {
+        if (!float.IsFinite(value)) {
+            return 0.0f;
+        }
+
+        return Math.Clamp(value, 0.0f, 1.0f);
+    }
+
+    public static bool TryNormalize(Vector2 value, out Vector2 normalized) {
+        float length_squared = value.LengthSquared();
+        if (!float.IsFinite(length_squared) || length_squared <= NormalizeEpsilonSquared) {
+            normalized = Vector2.Zero;
+            return false;
+        }
+
+        normalized = value / MathF.Sqrt(length_squared);
+        return true;
+    }
+
+    public static bool TryNormalize(Vector3 value, out Vector3 normalized) {
+        float length_squared = value.LengthSquared();
+        if (!float.IsFinite(length_squared) || length_squared <= NormalizeEpsilonSquared) {
+            normalized = Vector3.Zero;
+            return false;
+        }
+
+        normalized = value / MathF.Sqrt(length_squared);
+        return true;
+    }
+
+    public static Vector3 NormalizeOrDefault(Vector3 value, Vector3 fallback) {
+        if (!TryNormalize(value, out Vector3 normalized)) {
+            return fallback;
+        }
+
+        return normalized;
+    }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static float Lerpf(float lhs, float rhs, float t) {

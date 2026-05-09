@@ -26,6 +26,9 @@ internal struct LinePoint {
 }
 
 public unsafe class TargetLine {
+    private const ulong InvalidTargetId = 0xE0000000;
+    private const ulong GameObjectTargetIdFlag = 1UL << 63;
+
     public enum LineState {
         NewTarget, // new target (from no target)
         Dying, // no target, fading away
@@ -36,6 +39,8 @@ public unsafe class TargetLine {
     };
 
     public IGameObject Self;
+    public ulong SelfEntityId { get; private set; } = InvalidTargetId;
+    public ulong SelfGameObjectId { get; private set; } = InvalidTargetId;
 
     public LineState State = LineState.NewTarget;
     public bool Sleeping = true;
@@ -85,42 +90,47 @@ public unsafe class TargetLine {
     private readonly Vector2 uv4 = new Vector2(1.0f, 0);
 
     #region helpers for normal/focus target
+    private static ulong GetTargetKey(IGameObject? targetObject)
+    {
+        if (targetObject == null)
+        {
+            return InvalidTargetId;
+        }
+
+        if ((ulong)targetObject.EntityId != InvalidTargetId)
+        {
+            return targetObject.EntityId;
+        }
+
+        if ((ulong)targetObject.GameObjectId != InvalidTargetId)
+        {
+            return GameObjectTargetIdFlag | targetObject.GameObjectId;
+        }
+
+        return InvalidTargetId;
+    }
+
     private ulong GetTargetId()
     {
-        if (FocusTarget)
+        if (Self == null)
         {
-            if (Self != Service.ObjectTable.LocalPlayer)
-            {
-                return 0xE0000000;
-            }
-
-            var target = TargetSystem.Instance();
-            if (target != null)
-            {
-                if (target->FocusTarget != null && target->FocusTarget->EntityId != Service.ObjectTable.LocalPlayer.EntityId)
-                {
-                    return target->FocusTarget->EntityId;
-                }
-                else
-                {
-                    return 0xE0000000;
-                }
-            }
+            return InvalidTargetId;
         }
 
-        if (Self.TargetObject != null)
-        {
-            return Self.TargetObject.EntityId;
-        }
-
-        return 0xE0000000;
+        return GetTargetKey(GetTargetObject());
     }
 
     private IGameObject? GetTargetObject()
     {
+        if (Self == null)
+        {
+            return null;
+        }
+
         if (FocusTarget)
         {
-            if (Self != Service.ObjectTable.LocalPlayer)
+            var localPlayer = Service.ObjectTable.LocalPlayer;
+            if (localPlayer == null || SelfEntityId != localPlayer.EntityId)
             {
                 return null;
             }
@@ -128,20 +138,23 @@ public unsafe class TargetLine {
             var target = TargetSystem.Instance();
             if (target != null)
             {
-                if (target->FocusTarget != null && target->FocusTarget->EntityId != Service.ObjectTable.LocalPlayer.EntityId)
+                if (target->FocusTarget != null && target->FocusTarget->EntityId != localPlayer.EntityId)
                 {
-                    return Service.ObjectTable.SearchById(target->FocusTarget->GetGameObjectId());
-                }
-                else
-                {
-                    return null;
+                    var focusTarget = Service.ObjectTable.SearchById(target->FocusTarget->GetGameObjectId());
+                    if (focusTarget != null && focusTarget.IsValid())
+                    {
+                        return focusTarget;
+                    }
                 }
             }
+
+            return null;
         }
 
-        if (Self.TargetObject != null)
+        var targetObject = Self.TargetObject;
+        if (targetObject != null && targetObject.IsValid())
         {
-            return Self.TargetObject;
+            return targetObject;
         }
 
         return null;
@@ -154,16 +167,48 @@ public unsafe class TargetLine {
         InitializeTargetLine();
     }
 
+    public void Sleep()
+    {
+        Sleeping = true;
+        HasTarget = false;
+        HadTarget = false;
+        SelfEntityId = InvalidTargetId;
+        SelfGameObjectId = InvalidTargetId;
+    }
+
+    public bool RefreshSelf(IGameObject? gameObject)
+    {
+        if (gameObject == null || gameObject.IsValid() == false)
+        {
+            Sleep();
+            return false;
+        }
+
+        if (SelfEntityId != InvalidTargetId &&
+            ((ulong)gameObject.EntityId != SelfEntityId || (ulong)gameObject.GameObjectId != SelfGameObjectId))
+        {
+            Sleep();
+            return false;
+        }
+
+        Self = gameObject;
+        SelfEntityId = gameObject.EntityId;
+        SelfGameObjectId = gameObject.GameObjectId;
+        return true;
+    }
+
     #region Line Reinit
-    public unsafe void InitializeTargetLine(IGameObject obj = null)
+    public unsafe void InitializeTargetLine(IGameObject? obj = null)
     {
         if (obj != null)
         {
             Self = obj;
+            SelfEntityId = obj.EntityId;
+            SelfGameObjectId = obj.GameObjectId;
             var target = GetTargetObject();
             if (target != null && target.IsValid())
             {
-                LastTargetId = target.TargetObjectId;
+                LastTargetId = GetTargetKey(target);
                 LastTargetPosition = target.Position;
                 LastTargetPosition2 = LastTargetPosition;
             }
@@ -175,7 +220,7 @@ public unsafe class TargetLine {
 
             if (Sleeping)
             {
-                if ((FocusTarget && Service.ObjectTable.LocalPlayer?.IsDead != true) || !FocusTarget)
+                if ((FocusTarget && Service.ObjectTable.LocalPlayer?.GetIsDeadSafe() != true) || !FocusTarget)
                 {
                     State = LineState.NewTarget;
                 }
@@ -188,12 +233,13 @@ public unsafe class TargetLine {
 
     private void InitializeLinePoints(int sampleCount = 3)
     {
-        if (Points.Length != Globals.Config.saved.TextureCurveSampleCountMax)
+        int pointCapacity = Math.Max(3, Globals.Config.saved.TextureCurveSampleCountMax);
+        if (Points.Length != pointCapacity)
         {
-            Points = new LinePoint[Globals.Config.saved.TextureCurveSampleCountMax];
+            Points = new LinePoint[pointCapacity];
         }
 
-        SampleCount = sampleCount;
+        SampleCount = Math.Clamp(sampleCount, 3, pointCapacity);
         LinePointStep = 1.0f / (float)(SampleCount - 1);
     }
 
@@ -202,14 +248,39 @@ public unsafe class TargetLine {
         return index * LinePointStep;
     }
 
+    private float GetAnimationAlpha(float duration)
+    {
+        if (!float.IsFinite(duration) || duration <= 0.0f)
+        {
+            return 1.0f;
+        }
+
+        return MathUtils.Clamp01(StateTime / duration);
+    }
+
+    private float GetScaledAnimationAlpha(float duration, float scalar)
+    {
+        if (!float.IsFinite(scalar) || scalar <= 0.0f)
+        {
+            return 0.0f;
+        }
+
+        if (!float.IsFinite(duration) || duration <= 0.0f)
+        {
+            return 1.0f;
+        }
+
+        return MathUtils.Clamp01((StateTime / duration) * scalar);
+    }
+
     private float PointToLineDistance(Vector2 point, Vector2 lineStart, Vector2 lineEnd)
     {
-        if (lineStart == lineEnd)
+        Vector2 line = lineEnd - lineStart;
+        if (!MathUtils.TryNormalize(line, out Vector2 lineDir))
         {
             return Vector2.Distance(point, lineStart);
         }
 
-        Vector2 lineDir = Vector2.Normalize(lineEnd - lineStart);
         Vector2 perpendicular = new Vector2(-lineDir.Y, lineDir.X);
         return Math.Abs(Vector2.Dot(point - lineStart, perpendicular));
     }
@@ -237,6 +308,11 @@ public unsafe class TargetLine {
         {
             fpp = Globals.IsInFirstPerson();
             var cam = Service.CameraManager->Camera;
+            if (cam == null)
+            {
+                return position;
+            }
+
             float transition = cam->Transition; //Marshal.PtrToStructure<float>(((IntPtr)cam) + 0x1E0); // TODO: place in struct
             if (fpp || transition != 0 || FPPTransition.IsRunning)
             {
@@ -250,13 +326,23 @@ public unsafe class TargetLine {
 
     public unsafe Vector3 GetSourcePosition(out bool fpp)
     {
-        return CalculatePosition(Self.Position, Self.GetHeadHeight(), Self.EntityId == Service.ObjectTable.LocalPlayer.EntityId, out fpp);
+        var localPlayer = Service.ObjectTable.LocalPlayer;
+        bool isPlayer = localPlayer != null && Self.EntityId == localPlayer.EntityId;
+        return CalculatePosition(Self.Position, Self.GetHeadHeight(), isPlayer, out fpp);
     }
 
     public unsafe Vector3 GetTargetPosition(out bool fpp)
     {
         var target = GetTargetObject();
-        return CalculatePosition(target.Position, target.GetHeadHeight(), target.EntityId == Service.ObjectTable.LocalPlayer.EntityId, out fpp);
+        if (target == null)
+        {
+            fpp = false;
+            return LastTargetPosition;
+        }
+
+        var localPlayer = Service.ObjectTable.LocalPlayer;
+        bool isPlayer = localPlayer != null && target.EntityId == localPlayer.EntityId;
+        return CalculatePosition(target.Position, target.GetHeadHeight(), isPlayer, out fpp);
     }
 
 
@@ -327,10 +413,10 @@ public unsafe class TargetLine {
 
     private unsafe void DrawFancyLine_Caps(ImDrawListPtr drawlist, float lineThickness, bool firstSegmentOccluded, bool lastSegmentOccluded)
     {
-        Vector2 start_dir = Vector2.Normalize(Points[1].Pos - Points[0].Pos);
-        Vector2 end_dir = Vector2.Normalize(Points[SampleCount - 1].Pos - Points[SampleCount - 2].Pos);
-        Vector2 start_perp = new Vector2(-start_dir.Y, start_dir.X) * lineThickness;
-        Vector2 end_perp = new Vector2(-end_dir.Y, end_dir.X) * lineThickness;
+        Vector2 start_dir = Vector2.Zero;
+        Vector2 end_dir = Vector2.Zero;
+        bool drawBeginCap = DrawBeginCap && !firstSegmentOccluded && MathUtils.TryNormalize(Points[1].Pos - Points[0].Pos, out start_dir);
+        bool drawEndCap = DrawEndCap && !lastSegmentOccluded && MathUtils.TryNormalize(Points[SampleCount - 1].Pos - Points[SampleCount - 2].Pos, out end_dir);
 
         Vector2 start_p1 = Points[0].Pos - start_dir;
         Vector2 start_p2 = Points[0].Pos + start_dir;
@@ -355,7 +441,7 @@ public unsafe class TargetLine {
             linecolor_end->a = (byte)(linecolor_end->a * Globals.Config.saved.FadeToEndScalar);
         }
 
-        if (DrawBeginCap && !firstSegmentOccluded)
+        if (drawBeginCap)
         {
             var wrap = Globals.EdgeTexture.GetWrapOrEmpty();
             if (wrap != null)
@@ -364,7 +450,7 @@ public unsafe class TargetLine {
             }
         }
 
-        if (DrawEndCap && !lastSegmentOccluded)
+        if (drawEndCap)
         {
             var wrap = Globals.EdgeTexture.GetWrapOrEmpty();
             if (wrap != null)
@@ -407,7 +493,19 @@ public unsafe class TargetLine {
             Vector2 p1 = point.Pos;
             Vector2 p2 = nextpoint.Pos;
 
-            Vector2 dir = Vector2.Normalize(p2 - p1);
+            if (!MathUtils.TryNormalize(p2 - p1, out Vector2 dir))
+            {
+                if (index == 0)
+                {
+                    firstSegmentOccluded = true;
+                }
+                if (index == SampleCount - 2)
+                {
+                    lastSegmentOccluded = true;
+                }
+                continue;
+            }
+
             Vector2 perp = new Vector2(-dir.Y, dir.X) * lineThickness;
             Vector2 perpo = new Vector2(-dir.Y, dir.X) * outlineThickness;
 
@@ -436,12 +534,18 @@ public unsafe class TargetLine {
             if (!segmentOccluded)
             {
                 var wrapline = Globals.LineTexture.GetWrapOrEmpty();
-                drawlist.AddImageQuad(wrapline.Handle, p1_perp_inv, p2_perp_inv, p2_perp, p1_perp, uv1, uv2, uv3, uv4, linecolor[0].raw);
+                if (wrapline != null)
+                {
+                    drawlist.AddImageQuad(wrapline.Handle, p1_perp_inv, p2_perp_inv, p2_perp, p1_perp, uv1, uv2, uv3, uv4, linecolor[0].raw);
+                }
 
                 if (linecolor[1].a != 0 && outlineThickness != 0)
                 {
                     var wrapoutline = Globals.OutlineTexture.GetWrapOrEmpty();
-                    drawlist.AddImageQuad(wrapoutline.Handle, p1_perp_invo, p2_perp_invo, p2_perpo, p1_perpo, uv1, uv2, uv3, uv4, linecolor[1].raw);
+                    if (wrapoutline != null)
+                    {
+                        drawlist.AddImageQuad(wrapoutline.Handle, p1_perp_invo, p2_perp_invo, p2_perpo, p1_perpo, uv1, uv2, uv3, uv4, linecolor[1].raw);
+                    }
                 }
             }
         }
@@ -481,12 +585,12 @@ public unsafe class TargetLine {
 
         if (State == LineState.Dying)
         {
-            float alpha = StateTime / Globals.Config.saved.NoTargetFadeTime;
+            float alpha = GetAnimationAlpha(Globals.Config.saved.NoTargetFadeTime);
             heightFix *= 1.0f - alpha;
         }
         else if (State == LineState.NewTarget)
         {
-            float alpha = StateTime / Globals.Config.saved.NewTargetEaseTime;
+            float alpha = GetAnimationAlpha(Globals.Config.saved.NewTargetEaseTime);
             heightFix *= alpha;
         }
 
@@ -535,13 +639,21 @@ public unsafe class TargetLine {
     #region State Machine
     private void UpdateStateNewTarget()
     {
+        var target = GetTargetObject();
+        if (target == null)
+        {
+            State = LineState.Dying;
+            StateTime = 0;
+            UpdateStateDying();
+            return;
+        }
+
         bool fpp0;
         bool fpp1;
         Vector3 _source = GetSourcePosition(out fpp0);
         Vector3 _target = GetTargetPosition(out fpp1);
         Vector3 start = _source;
         Vector3 end = _target;
-        var target = GetTargetObject();
 
         float start_height = Self.GetCursorHeight();
         float end_height = target.GetCursorHeight();
@@ -550,7 +662,7 @@ public unsafe class TargetLine {
         float start_height_scaled = (fpp0 ? 0 : start_height) * Globals.Config.saved.HeightScale;
         float end_height_scaled = (fpp1 ? 0 : end_height) * Globals.Config.saved.HeightScale;
 
-        float alpha = Math.Max(0, Math.Min(1, StateTime / Globals.Config.saved.NewTargetEaseTime));
+        float alpha = GetAnimationAlpha(Globals.Config.saved.NewTargetEaseTime);
 
         LastTargetHeight = end_height;
         MidHeight = mid_height;
@@ -571,7 +683,7 @@ public unsafe class TargetLine {
 
     private void UpdateStateDying_Anim(float mid_height)
     {
-        float alpha = Math.Min(1, (StateTime / Globals.Config.saved.NoTargetFadeTime) * Globals.Config.saved.DeathAnimationTimeScale);
+        float alpha = GetScaledAnimationAlpha(Globals.Config.saved.NoTargetFadeTime, Globals.Config.saved.DeathAnimationTimeScale);
 
         switch (Globals.Config.saved.DeathAnimation)
         {
@@ -602,7 +714,7 @@ public unsafe class TargetLine {
         float start_height_scaled = (fpp ? 0 : start_height) * Globals.Config.saved.HeightScale;
         float end_height_scaled = end_height * Globals.Config.saved.HeightScale;
 
-        float alpha = Math.Max(0, Math.Min(1, StateTime / Globals.Config.saved.NoTargetFadeTime));
+        float alpha = GetAnimationAlpha(Globals.Config.saved.NoTargetFadeTime);
 
         UpdateStateDying_Anim(mid_height);
 
@@ -611,7 +723,7 @@ public unsafe class TargetLine {
 
         if (alpha >= 1)
         {
-            Sleeping = true;
+            Sleep();
         }
 
         Position = start;
@@ -621,6 +733,15 @@ public unsafe class TargetLine {
 
     private void UpdateStateSwitching()
     {
+        var target = GetTargetObject();
+        if (target == null)
+        {
+            State = LineState.Dying;
+            StateTime = 0;
+            UpdateStateDying();
+            return;
+        }
+
         bool fpp0;
         bool fpp1;
         Vector3 _source = GetSourcePosition(out fpp0);
@@ -628,7 +749,6 @@ public unsafe class TargetLine {
 
         Vector3 start = LastTargetPosition;
         Vector3 end = _target;
-        var target = GetTargetObject();
 
         float start_height = Self.GetCursorHeight();
         float end_height = target.GetCursorHeight();
@@ -637,7 +757,7 @@ public unsafe class TargetLine {
         float start_height_scaled = (fpp0 ? 0 : start_height) * Globals.Config.saved.HeightScale;
         float end_height_scaled = (fpp1 ? 0 : end_height) * Globals.Config.saved.HeightScale;
 
-        float alpha = Math.Max(0, Math.Min(1, StateTime / Globals.Config.saved.NewTargetEaseTime));
+        float alpha = GetAnimationAlpha(Globals.Config.saved.NewTargetEaseTime);
 
         start.Y += LastTargetHeight * Globals.Config.saved.HeightScale;
         end.Y += end_height_scaled * Globals.Config.saved.HeightScale;
@@ -658,11 +778,19 @@ public unsafe class TargetLine {
 
     private void UpdateStateIdle()
     {
+        var target = GetTargetObject();
+        if (target == null)
+        {
+            State = LineState.Dying;
+            StateTime = 0;
+            UpdateStateDying();
+            return;
+        }
+
         bool fpp0;
         bool fpp1;
         Vector3 _source = GetSourcePosition(out fpp0);
         Vector3 _target = GetTargetPosition(out fpp1);
-        var target = GetTargetObject();
 
         float start_height = Self.GetCursorHeight();
         float end_height = target.GetCursorHeight();
@@ -690,7 +818,7 @@ public unsafe class TargetLine {
 
         if (State != LineState.Dying2)
         {
-            if (FocusTarget && Service.ObjectTable.LocalPlayer?.IsDead == true)
+            if (FocusTarget && Service.ObjectTable.LocalPlayer?.GetIsDeadSafe() == true)
             {
                 HadTarget = HasTarget;
                 return;
@@ -724,7 +852,7 @@ public unsafe class TargetLine {
             if (HasTarget && HadTarget)
             {
                 var id = GetTargetId();
-                if (id != LastTargetId && id != 0xE0000000)
+                if (id != LastTargetId && id != InvalidTargetId)
                 {
                     LastTargetId = id;
                     new_target = true;
@@ -888,7 +1016,7 @@ public unsafe class TargetLine {
         bool vis2 = false;
 
         var target = GetTargetObject();
-        if (HasTarget)
+        if (HasTarget && target != null)
         {
             vis1 = target.IsVisible(occlusion);
         }
@@ -975,23 +1103,40 @@ public unsafe class TargetLine {
                         screenDistance += midToLine * 2.0f;
                     }
 
-                    var screenSpaceSampleDensity = (ImGui.GetMainViewport().Size.X / (max - min)) * 0.75f;
-                    sampleCountTarget = min + (int)Math.Floor(screenDistance / screenSpaceSampleDensity);
+                    float screenSpaceSampleDensity = (ImGui.GetMainViewport().Size.X / (max - min)) * 0.75f;
+                    if (float.IsFinite(screenSpaceSampleDensity) && screenSpaceSampleDensity > 0.0f)
+                    {
+                        sampleCountTarget = min + (int)Math.Floor(screenDistance / screenSpaceSampleDensity);
+                    }
+                    else
+                    {
+                        sampleCountTarget = min;
+                    }
                 }
                 else // 3d distance
                 {
-                    sampleCountTarget = min + ((int)Math.Floor(1.5f + (TargetPosition - Position).Length())) * 2;
+                    float lineDistance = (TargetPosition - Position).Length();
+                    if (float.IsFinite(lineDistance))
+                    {
+                        sampleCountTarget = min + ((int)Math.Floor(1.5f + lineDistance)) * 2;
+                    }
+                    else
+                    {
+                        sampleCountTarget = min;
+                    }
                 }
 
                 if (Globals.Config.saved.ViewAngleSampling)
                 {
-                    Vector3 lineDir = Vector3.Normalize(TargetPosition - Position);
-                    Vector3 cameraDir = Globals.WorldCamera_GetForward();
-                    float dotProduct = Math.Abs(Vector3.Dot(lineDir, cameraDir));
+                    if (MathUtils.TryNormalize(TargetPosition - Position, out Vector3 lineDir))
+                    {
+                        Vector3 cameraDir = Globals.WorldCamera_GetForward();
+                        float dotProduct = Math.Clamp(Math.Abs(Vector3.Dot(lineDir, cameraDir)), 0.0f, 1.0f);
 
-                    // lines perpendicular to camera view get more samples
-                    float viewingAngleFactor = 1.0f + ((1.0f - dotProduct) * 0.25f);
-                    sampleCountTarget = (int)(sampleCountTarget * viewingAngleFactor);
+                        // lines perpendicular to camera view get more samples
+                        float viewingAngleFactor = 1.0f + ((1.0f - dotProduct) * 0.25f);
+                        sampleCountTarget = (int)(sampleCountTarget * viewingAngleFactor);
+                    }
                 }
 
                 if (sampleCountTarget > max)
@@ -1023,11 +1168,9 @@ public unsafe class TargetLine {
 
     public unsafe void Update()
     {
-        var target = GetTargetObject();
-
         if (Self == null || Self.IsValid() == false)
         {
-            Sleeping = true;
+            Sleep();
             return;
         }
 
@@ -1037,7 +1180,9 @@ public unsafe class TargetLine {
             return;
         }
 
-        if ((((int)csObj->RenderFlags & 0x800) != 0 || Self.IsDead) && State != LineState.Dying2)
+        var target = GetTargetObject();
+
+        if ((((int)csObj->RenderFlags & 0x800) != 0 || Self.GetIsDeadSafe()) && State != LineState.Dying2)
         {
             State = LineState.Dying2;
             StateTime = 0;
@@ -1087,7 +1232,7 @@ public unsafe class TargetLine {
             drawlist.AddText(MidScreenPos, 0xFF00FFFF, sampleCountString);
             drawlist.AddText(TargetScreenPos, 0xFFFFFFFF, sampleCountString);
             drawlist.AddText(pos2, 0xFFFFFFFF, $"EntityId: {Self.EntityId:X}, GameObjectId: {Self.GameObjectId:X}; State: {State}");
-            drawlist.AddText(pos3, 0xFFFFFFFF, $"Dead? {Self.IsDead}; Render Flags: {Self.GetClientStructGameObject()->RenderFlags:X}");
+            drawlist.AddText(pos3, 0xFFFFFFFF, $"Dead? {Self.GetIsDeadSafe()}; Render Flags: {Self.GetClientStructGameObject()->RenderFlags:X}");
         }
 
         return true;
@@ -1097,6 +1242,11 @@ public unsafe class TargetLine {
     {
         var group = GroupManager.Instance();
         var chara = CharacterManager.Instance();
+        if (group == null || chara == null || Self == null || Self.Address == IntPtr.Zero)
+        {
+            return;
+        }
+
         uint partyMemberNewTarget = 0xE0000000;
 
         // friendlies target any existing targeted drk, otherwise any tank
@@ -1148,9 +1298,10 @@ public unsafe class TargetLine {
             else if (player->GameObject.ObjectKind == FFXIVClientStructs.FFXIV.Client.Game.Object.ObjectKind.Pc)
             {
                 // probably a baddie, target the player character
-                if (Service.ObjectTable.LocalPlayer != null)
+                var localPlayer = Service.ObjectTable.LocalPlayer;
+                if (localPlayer != null)
                 {
-                    player->TargetId = Service.ObjectTable.LocalPlayer.EntityId;
+                    player->TargetId = localPlayer.EntityId;
                 }
             }
         }

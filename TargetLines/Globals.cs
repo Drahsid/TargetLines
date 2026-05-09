@@ -50,7 +50,7 @@ internal class Globals {
             return new Vector3(0, 0, 1);
         }
 
-        return Vector3.Normalize(WorldCamera_GetPos() - WorldCamera_GetLookAtPos());
+        return MathUtils.NormalizeOrDefault(WorldCamera_GetPos() - WorldCamera_GetLookAtPos(), new Vector3(0, 0, 1));
     }
 
     public static unsafe bool IsInFirstPerson() {
@@ -69,7 +69,16 @@ internal class Globals {
         }
 
         var device = FFXIVClientStructs.FFXIV.Client.Graphics.Kernel.Device.Instance();
+        if (device == null) {
+            return false;
+        }
+
         var cam = Service.CameraManager->Camera;
+        if (!float.IsFinite(dot)) {
+            return false;
+        }
+
+        dot = Math.Clamp(dot, -1.0f, 1.0f);
         float angle = MathF.Acos(dot);
         float fovy = cam->FoV;
         float fovx = 2.0f * MathF.Atan(MathF.Tan(cam->FoV * 0.5f) * device->AspectRatio);
@@ -83,7 +92,7 @@ internal class Globals {
     public static unsafe float GetAngleThetaToCamera(Vector3 position) {
         Vector3 cam = WorldCamera_GetPos();
         Vector3 forward = WorldCamera_GetForward();
-        Vector3 to_camera = Vector3.Normalize(cam - position);
+        Vector3 to_camera = MathUtils.NormalizeOrDefault(cam - position, forward);
 
         return Vector3.Dot(to_camera, forward);
     }
@@ -102,7 +111,10 @@ internal class Globals {
             var length = direction.Length();
 
             if (length != 0) {
-                Vector3 dir = Vector3.Normalize(direction);
+                if (!MathUtils.TryNormalize(direction, out Vector3 dir)) {
+                    return false;
+                }
+
                 var flags = stackalloc int[] { 0x4000, 0x4000 }; // should probably figure out what these mean
                 var hit = stackalloc RaycastHit[1];
                 var result = Framework->BGCollisionModule->RaycastMaterialFilter(hit, &cam, &dir, length, 1, flags);

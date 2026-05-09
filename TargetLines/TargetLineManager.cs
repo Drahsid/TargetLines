@@ -37,7 +37,7 @@ public static class TargetLineManager
 
 
     public static unsafe void InitializeLine(TargetLine line, IGameObject gameObject) {
-        if (line.Sleeping || line.Self.EntityId != gameObject.EntityId) {
+        if (line.Sleeping || line.SelfEntityId != gameObject.EntityId) {
             var group = GroupManager.Instance();
             switch (Globals.Config.saved.LinePartyMode) {
                 default:
@@ -45,11 +45,17 @@ public static class TargetLineManager
                     line.InitializeTargetLine(gameObject);
                     break;
                 case LinePartyMode.PartyOnly:
+                    if (group == null) {
+                        break;
+                    }
                     if (group->MainGroup.IsEntityIdInParty(gameObject.EntityId) || group->MainGroup.IsEntityIdInParty((uint)gameObject.TargetObjectId)) {
                         line.InitializeTargetLine(gameObject);
                     }
                     break;
                 case LinePartyMode.PartyOnlyInAlliance:
+                    if (group == null) {
+                        break;
+                    }
                     if (group->MainGroup.IsAlliance) {
                         if (group->MainGroup.IsEntityIdInParty(gameObject.EntityId) || group->MainGroup.IsEntityIdInParty((uint)gameObject.TargetObjectId))
                         {
@@ -61,6 +67,9 @@ public static class TargetLineManager
                     }
                     break;
                 case LinePartyMode.AllianceOnly:
+                    if (group == null) {
+                        break;
+                    }
                     if (group->MainGroup.IsEntityIdInAlliance(gameObject.EntityId) || group->MainGroup.IsEntityIdInAlliance((uint)gameObject.TargetObjectId)) {
                         line.InitializeTargetLine(gameObject);
                     }
@@ -96,7 +105,8 @@ public static class TargetLineManager
         int renderedLineCount = 0;
         int processedLineCount = 0;
 
-        if (Service.ObjectTable.LocalPlayer == null || TargetLineArray == null) {
+        var localPlayer = Service.ObjectTable.LocalPlayer;
+        if (localPlayer == null || TargetLineArray == null) {
             return;
         }
 
@@ -112,17 +122,20 @@ public static class TargetLineManager
         var target = TargetSystem.Instance();
         if (target != null)
         {
-            if (FocusTargetLine.Sleeping && !Service.ObjectTable.LocalPlayer.IsDead)
+            if (FocusTargetLine.Sleeping && !localPlayer.GetIsDeadSafe())
             {
-                if (target->FocusTarget != null && target->FocusTarget->EntityId != Service.ObjectTable.LocalPlayer.EntityId)
+                if (target->FocusTarget != null && target->FocusTarget->EntityId != localPlayer.EntityId)
                 {
-                    InitializeLine(FocusTargetLine, Service.ObjectTable.LocalPlayer);
+                    InitializeLine(FocusTargetLine, localPlayer);
                 }
             }
 
             if (!FocusTargetLine.Sleeping)
             {
-                FocusTargetLine.Update();
+                if (FocusTargetLine.RefreshSelf(localPlayer))
+                {
+                    FocusTargetLine.Update();
+                }
             }
         }
 
@@ -133,16 +146,16 @@ public static class TargetLineManager
 
             if (gameObject != null && gameObject.IsValid())
             {
-                var csGameObject = gameObject.GetClientStructGameObject();
-                bool hasTarget = gameObject.TargetObject != null && gameObject.TargetObject.IsValid();
-                bool initializeLine = hasTarget && line.Sleeping && !gameObject.IsDead;
+                var targetObject = gameObject.TargetObject;
+                bool hasTarget = targetObject != null && targetObject.IsValid();
+                bool initializeLine = hasTarget && line.Sleeping && !gameObject.GetIsDeadSafe();
 
 #if !PROBABLY_BAD
                 if (!gameObject.IsTargetable) {
                     initializeLine = false;
                 }
 
-                if (hasTarget && !gameObject.TargetObject.IsTargetable) {
+                if (hasTarget && targetObject != null && !targetObject.IsTargetable) {
                     initializeLine = false;
                 }
 #endif
@@ -155,9 +168,14 @@ public static class TargetLineManager
 
             if (!line.Sleeping)
             {
+                if (!line.RefreshSelf(gameObject))
+                {
+                    continue;
+                }
+
                 line.Update();
 
-                if (line.LineSettings.LineColor.Visible)
+                if (!line.Sleeping && line.LineSettings.LineColor.Visible)
                 {
                     lineDrawIndices.Add(index);
                 }
